@@ -74,7 +74,7 @@ is_end db   0
 upperLine   db  "/----------------------------------------------------------------------\", '0'
 midleLine   db  "|----------------------------------------------------------------------|", '0'
 downLine    db  "\----------------------------------------------------------------------/", '0'
-emptyLine   db  "|                                                                      |", '0'
+emptyLine   db  "                                                                      ", '0'
 
 openedCorrect   db  "Opened", '0'
 openedError   db  "Error", '0'
@@ -82,6 +82,7 @@ openedError   db  "Error", '0'
 crtlE   db  " CTRL + E/EXIT |", '0'
 ctrlS   db  " CTRL + S/SAVE |", '0'
 ctrlO   db  " CTRL + O/OPEN |", '0'
+ctrlF   db  " CTRL + F/FIND |", '0'
 
 
 
@@ -553,6 +554,7 @@ set_ctrl    proc
     print_zero_line crtlE,max_output_len
     print_zero_line ctrlS,max_output_len
     print_zero_line ctrlO,max_output_len
+    print_zero_line ctrlF,max_output_len
     
     ret
 
@@ -891,20 +893,9 @@ delete  proc
     inc ax
     cmp ax, current_line_edit_offset
     jne @@next_delete1
+    inc current_edit_position
     pop ax
-    
-    sub current_line_edit_offset, ax
-    
-    
-    call shift_back
-    xor ah,ah
-    mov posX ,al
-    add posX, 5
-    dec posY
-    
-    jmp @@clear_out
-    
-    
+    jmp end_delete
     
     @@next_delete1:
     pop ax
@@ -916,8 +907,7 @@ delete  proc
     mov ah, 2
     int 10h
     
-    @@clear_out:
-   
+    @@clear_out:  
     call clear_screen
     mov dl, 5
     mov dh, 2
@@ -994,8 +984,10 @@ close_file:
 
 
 
-;// CTRL procedures: EXIT/SAVE/OPEN
-exit    proc
+    ;// CTRL procedures: EXIT/SAVE/OPEN/FIND
+    
+find    proc
+
     mov dl, posX
     mov dh, posY
     
@@ -1006,11 +998,89 @@ exit    proc
     push bx
     mov bl, 74h
     mov dh, 22
+    mov dl, 53
+    
+    mov ah, 02h
+    int 10h
+    
+    mov ax,sum_screen_line_off
+    push ax
+    mov sum_screen_line_off,0
+    mov al, is_end
+    push ax
+    print_zero_line ctrlF, max_output_len
+    pop ax
+    mov is_end, al
+    pop ax
+    mov sum_screen_line_off, ax
+    
+    
+find_wait:
+    mov cx, 0
+    mov dx, 1000
+    mov ah, 86h
+    int 15h
+
+
+    xor ah,ah
+    int 16h
+    
+    cmp ah, 01h
+    je @@return
+    
+    jmp find_wait
+
+@@return:
+    mov dh, 22
+    mov dl, 53
+    
+    mov ah, 02h
+    int 10h
+    pop bx
+    mov ax,sum_screen_line_off
+    push ax
+    mov sum_screen_line_off,0
+    mov al, is_end
+    push ax
+    print_zero_line ctrlF, max_output_len
+    pop ax
+    mov is_end, al
+    pop ax
+    mov sum_screen_line_off, ax
+    call set_pos_XY
+    ret
+find    endp
+
+
+
+    
+exit    proc
+    mov dl, posX
+    mov dh, posY
+    
+    mov tempPosX, dl
+    mov tempPosY, dh
+    
+    
+    push bx
+    mov bl, 74h
+    
+    mov dh, 22
     mov dl, 5
     
     mov ah, 02h
     int 10h
+    mov ax, sum_screen_line_off
+    push ax
+    mov sum_screen_line_off,0
+    
+    mov al, is_end
+    push ax
     print_zero_line crtlE, max_output_len
+    pop ax
+    mov is_end, al
+    pop ax
+    mov sum_screen_line_off, ax
 exit_wait:
     
     mov cx, 0
@@ -1038,7 +1108,19 @@ return_main:
     mov ah, 02h
     int 10h
     pop bx
+    
+    mov ax, sum_screen_line_off
+    push ax
+    mov sum_screen_line_off,0
+    
+    mov al, is_end
+    push ax
     print_zero_line crtlE, max_output_len
+    pop ax
+    mov is_end, al
+    pop ax
+    mov sum_screen_line_off, ax
+    
     call set_pos_XY
     ret
     
@@ -1064,7 +1146,19 @@ save    proc
     
     mov ah, 02h
     int 10h
+    
+    
+    mov ax, sum_screen_line_off
+    push ax
+    mov sum_screen_line_off,0
+    
+    mov al, is_end
+    push ax
     print_zero_line ctrlS, max_output_len
+    pop ax
+    mov is_end, al
+    pop ax
+    mov sum_screen_line_off, ax
     
 save_wait:
     
@@ -1088,7 +1182,17 @@ return_main_save:
     mov ah, 02h
     int 10h
     pop bx
+    mov ax, sum_screen_line_off
+    push ax
+    mov sum_screen_line_off,0
+    
+    mov al, is_end
+    push ax
     print_zero_line ctrlS, max_output_len
+    pop ax
+    mov is_end, al
+    pop ax
+    mov sum_screen_line_off, ax
     call set_pos_XY
     ret
     
@@ -1136,7 +1240,7 @@ new_window:
     
     pop bx
     mov dh, 20
-    mov dl, 4
+    mov dl, 5
     mov ah, 02h
     int 10h
     print_zero_line emptyLine, max_output_len
@@ -1465,6 +1569,9 @@ main_cycle:
     cmp ah, 0Fh
     je tab_input
     
+    cmp al, 06h
+    je find_main
+    
     cmp al, 13h
     je save_main
     
@@ -1473,6 +1580,7 @@ main_cycle:
     
     cmp al, 0Fh
     je open_main
+    
 
     cmp al, 0Dh
     je next_line
@@ -1540,6 +1648,10 @@ save_main:
     
 open_main:
     call open
+    jmp main_cycle
+    
+find_main:
+    call find
     jmp main_cycle
     
 no_key_pressed:
