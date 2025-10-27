@@ -25,12 +25,12 @@ arg6    dw  0
 arg7    dw  0
 
 
-inp_len db 1
+inp_len db 0
 max_len db 71
 
 
-max_system_len db 72
-max_output_len db 69
+max_system_len db 73;?72
+max_output_len db 70
 
 
 current_screen_line_off dw 0
@@ -67,6 +67,7 @@ tempPosY    db  0
 error_flag  db 0
 is_first db 1
 is_end db   0
+is_endline  db  0
 
 
 
@@ -74,7 +75,7 @@ is_end db   0
 upperLine   db  "/----------------------------------------------------------------------\", '0'
 midleLine   db  "|----------------------------------------------------------------------|", '0'
 downLine    db  "\----------------------------------------------------------------------/", '0'
-emptyLine   db  "                                                                      ", '0'
+emptyLine   db  "                                                                     ", '0'
 
 openedCorrect   db  "Opened", '0'
 openedError   db  "Error", '0'
@@ -370,6 +371,7 @@ endPrint:
     
     cmp inp_len, ah
     je nexLineOver
+
     jmp nothingOver
     
 nexLineOver:
@@ -378,16 +380,16 @@ nexLineOver:
     inc image_size
     
     inc dh
-    mov dl, 4
-    mov ah, 0
+    mov dl, 5
+    mov ah, 02h
     int 10h
     cmp image_size, 16
     jne next_printZ
-    mov inp_len, -2
+    mov inp_len, 0
     jmp nothingOver
 next_printZ:
     
-    mov inp_len, -1
+    mov inp_len, 0
     
 nothingOver:
     
@@ -651,6 +653,25 @@ close_up:
     ret
     
 move_up endp
+
+
+move_right_fileN  proc
+    
+    mov dh, posY
+    mov dl, posX
+    cmp dl, posMaxL
+    je @@end_right
+    
+    mov ah,2
+    inc dl
+    int 10h
+    
+    mov posX, dl
+    
+@@end_right:
+    ret
+
+move_right_fileN  endp
     
 
 move_right  proc
@@ -659,6 +680,12 @@ move_right  proc
     mov dl, posX
     cmp dl, posMaxL
     je end_right
+    
+    ;lea di, buffer
+    ;add di, current_edit_position
+    ;inc di
+    ;cmp byte ptr[di], '0'
+    ;je end_right
     
     mov ah,2
     inc dl
@@ -680,7 +707,7 @@ move_left   proc
 
     cmp dl, posMinL
     jne left
-    jmp short end_up
+    jmp short end_left
 
 left:
     dec dl
@@ -696,7 +723,13 @@ move_left   endp
 move_down   proc
    
     cmp is_end, 1
+    jne @@next1
+    
+    mov dh, posY
+    cmp dh, posMaxH
     je check1
+    
+    @@next1:
     
     push sum_screen_line_off
     push current_screen_line_off
@@ -718,8 +751,13 @@ move_down   proc
     
 check1:
     cmp is_end, 1
+    jne @@next
+    
+    mov dh, posY
+    cmp dh, posMaxH
     je close_end
-
+    
+    @@next:
 
     mov dh, posY
     mov dl, posX
@@ -828,10 +866,8 @@ print_one_main  proc
     mov ah, 09h
     int 10h
    
-    
-  
     call move_right
-    
+    ;call move_right_fileN
     ret
 
 print_one_main endp
@@ -893,9 +929,16 @@ delete  proc
     inc ax
     cmp ax, current_line_edit_offset
     jne @@next_delete1
-    inc current_edit_position
+    
+    sub current_line_edit_offset, 70
+    call shift_back
+    ;dec current_edit_position
+    dec posY
+    mov posX, 74 
+    
     pop ax
-    jmp end_delete
+    jmp @@clear_out
+    ;endif2
     
     @@next_delete1:
     pop ax
@@ -1412,6 +1455,7 @@ right_check_main    endp
 down_check_main    proc
     push bx
     call move_down
+    
     lea di, buffer
     mov bx, current_line_edit_offset
     
@@ -1445,6 +1489,7 @@ down_check_main    proc
             mov ah, 02h
             int 10h
     
+    @@return:
     pop bx
     ret
 down_check_main    endp
@@ -1516,6 +1561,62 @@ left_check_main proc
     
 left_check_main endp
 
+
+step    proc
+    
+    call move_down
+    mov posX, 5
+    mov ax, current_line_edit_offset
+    mov current_edit_position, ax
+    
+    call clear_screen
+    mov dl, 5
+    mov dh, 2
+    mov ah, 02h
+    int 10h
+    print_offset_zero_line buffer, max_output_len
+    
+    mov dh, posY
+    mov dl, posX
+    mov ah, 02h
+    int 10h
+    mov is_endline, 0
+    ret
+step    endp
+
+
+input_key   proc
+
+    lea di, buffer
+    add di, current_edit_position
+    cmp byte ptr[di], 0Dh
+    jne @@next
+    call shift_one
+    @@next:
+    
+    
+    mov cl, posMaxL
+    cmp posX, cl
+    jne @@next1
+    mov is_endline, 1
+    @@next1:
+    
+    print_one al
+    
+    lea di, buffer
+    add di, current_edit_position
+    mov byte ptr[di], al
+    inc current_edit_position
+    
+    cmp is_endline, 1
+    jne @@next2
+    call step
+    @@next2:
+    
+    ret
+
+input_key   endp
+
 ;//Main code section
 start:
 
@@ -1581,9 +1682,9 @@ main_cycle:
     cmp al, 0Fh
     je open_main
     
-
     cmp al, 0Dh
     je next_line
+    
     jmp print_input_key
     
 
@@ -1593,18 +1694,7 @@ next_line:
 
     
 print_input_key:
-    lea di, buffer
-    add di, current_edit_position
-    cmp byte ptr[di], 0Dh
-    jne @@next
-    call shift_one
-    @@next:
-    print_one al
-    lea di, buffer
-    add di, current_edit_position
-    ;inc current_edit_position
-    mov byte ptr[di], al
-    inc current_edit_position
+    call input_key
     jmp main_cycle
 
     
