@@ -20,9 +20,15 @@ arg2    db  0
 arg3    db  0
 arg4    db  255 dup(' ')
 
+
 arg5    dw  0
 arg6    dw  0
 arg7    dw  0
+
+
+arg8    db  0
+arg9    db  0
+arg10   db  255 dup(' ')
 
 
 inp_len db 0
@@ -40,6 +46,10 @@ sum_screen_line_off dw  0
 
 
 file_name   db 63 dup(0)
+substring_to_find   db 63 dup(0)
+
+start_find  dw  0
+end_find    dw  0
 
 
 
@@ -50,6 +60,8 @@ current_line_edit_offset    dw  0
 
 image_size  dw  0
 temp_image_size dw 0
+
+is_first_print_one db 0
 
 posX    db  5
 posY    db  2
@@ -70,14 +82,18 @@ is_end db   0
 is_endline  db  0
 
 
+filePointer dw  0
+
+
 
 
 upperLine   db  "/----------------------------------------------------------------------\", '0'
 midleLine   db  "|----------------------------------------------------------------------|", '0'
 downLine    db  "\----------------------------------------------------------------------/", '0'
-emptyLine   db  "                                                                     ", '0'
+emptyLine   db  "                                                                      ", '0'
 
 openedCorrect   db  "Opened", '0'
+saveCorrect db  " Saved", '0'
 openedError   db  "Error", '0'
 
 crtlE   db  " CTRL + E/EXIT |", '0'
@@ -131,9 +147,27 @@ print_offset_zero_line  macro   string, maxlen_inp
     mov max_len, ah
     pop ax
     
-    
     lea si, string
     call printLineZ
+endm
+
+; args1 - dh, args2 - dl
+print_without_off  macro  args1, args2, string, maxlen_inp
+
+    push ax
+    mov ah, args1
+    mov arg8, ah
+    mov ah, args2
+    mov arg9, ah
+    pop ax
+    
+    push ax
+    mov ah, maxlen_inp
+    mov max_len, ah
+    pop ax
+    
+    lea si, string
+    call zero_off_print
 endm
 
 
@@ -150,6 +184,47 @@ endm
 
 
 ;//Procedure code section
+
+
+
+
+write_to_file   proc
+    
+    push ax bx cx dx
+    
+    
+    mov dx, offset file_name
+    mov cx, 0
+    mov ah, 3Ch
+    int 21h
+    mov filePointer,ax
+    
+    mov dx, offset buffer
+    mov cx, 0
+    lea si, buffer
+    
+    @@forloop:
+        cmp byte ptr[si], '0'
+        je @@breakloop
+        inc si
+        inc cx
+        jmp @@forloop
+        
+    @@breakloop:
+    mov bx, filePointer
+    mov ah, 40h
+    int 21h
+    
+    mov bx, filePointer
+    mov ah, 3Eh
+    int 21h
+    
+    
+    pop dx cx bx ax
+    ret
+
+write_to_file   endp
+
 first_line_len  proc
     
     lea di, buffer
@@ -497,6 +572,38 @@ set_edit_screen endp
 
 
 
+
+zero_off_print  proc
+    mov ax, sum_screen_line_off
+    push ax
+    mov al, is_end
+    push ax
+    mov sum_screen_line_off, 0
+    
+    mov dh, arg8
+    mov dl, arg9
+    mov ah, 02h
+    int 10h
+    push bx
+    mov bl, 12h
+    
+    ;print_zero_line
+    call printLineZ
+    
+    pop bx
+    
+    
+    pop ax
+    mov is_end, al
+    pop ax
+    mov sum_screen_line_off,ax
+    
+    ret
+zero_off_print  endp
+
+
+
+
 clear_screen    proc
     mov dh, 2
     mov dl, 5
@@ -655,6 +762,56 @@ close_up:
 move_up endp
 
 
+up_check_main   proc
+    push bx
+    mov ax ,current_line_edit_offset
+    cmp ax, 0
+    je @@return
+    
+    
+    call move_up
+    
+    lea di , buffer
+    mov bx,  current_line_edit_offset
+    
+    cmp byte ptr[di + bx], 0Dh
+    jne @@forlpop
+    inc bx
+    jmp @@true
+    
+    @@forlpop:
+        cmp byte ptr[di + bx], 0Dh
+        je @@true
+        
+        cmp bx, current_edit_position
+        jg @@true
+        
+        inc bx
+        jmp @@forlpop
+        
+    
+    
+    @@true:
+    dec bx
+    mov current_edit_position, bx
+    
+    sub bx, current_line_edit_offset
+    
+    xor bh,bh
+    mov dl, bl
+    add dl ,5
+    mov posX, dl
+    mov ah, 02h
+    int 10h
+    
+    @@return:
+    pop bx
+    ret
+    
+    
+up_check_main   endp
+
+
 move_right_fileN  proc
     
     mov dh, posY
@@ -680,12 +837,6 @@ move_right  proc
     mov dl, posX
     cmp dl, posMaxL
     je end_right
-    
-    ;lea di, buffer
-    ;add di, current_edit_position
-    ;inc di
-    ;cmp byte ptr[di], '0'
-    ;je end_right
     
     mov ah,2
     inc dl
@@ -804,6 +955,50 @@ close_end:
     
     ret
 move_down   endp
+
+
+
+down_check_main    proc
+    push bx
+    call move_down
+    
+    lea di, buffer
+    mov bx, current_line_edit_offset
+    
+    cmp byte ptr[di + bx], 0Dh
+    jne @@forllop
+    inc bx
+    jmp @@breakloop
+    
+    @@forllop:
+        cmp bx, current_edit_position
+        jg @@breakloop
+        
+        cmp byte ptr[di + bx], 0Dh
+        je @@breakloop
+        
+        inc bx
+        jmp @@forllop
+            
+    
+        @@breakloop:
+            dec bx
+            mov current_edit_position, bx
+            
+            sub bx, current_line_edit_offset
+            xor bh,bh
+            mov dl, bl
+            add dl, 5
+            mov posX, dl
+            mov dh ,posY
+            
+            mov ah, 02h
+            int 10h
+    
+    @@return:
+    pop bx
+    ret
+down_check_main    endp
 
 
 end_line   proc
@@ -1022,10 +1217,310 @@ close_file:
     
     pop si
     ret
-    open_file   endp
+open_file   endp
+
+   
+select_find_mark    proc
+    push di
+    push si
+    
+    mov ah, posY
+    mov al, posX
+    push ax
+    
+    mov dh, tempPosY
+    mov dl, tempPosX
+    mov posX, dl
+    mov posY, dh
+    mov ah, 02h
+    int 10h
+    
+    
+    call up_check_main
+        push bx
+        xor bh,bh
+        mov bl, 00011111b
+        call clear_screen
+        mov dl, 5
+        mov dh, 2
+        mov ah, 02h
+        int 10h
+        print_zero_line buffer, max_output_len
+        pop bx
+    
+    mov ax, start_find
+    sub ax, current_line_edit_offset
+    
+    
+    mov dl, al
+    add dl, 5
+    mov dh, posY
+    mov ah, 02h
+    int 10h
+    
+    mov posX, dl
+    
+    lea si, buffer
+    add si, start_find
+    
+    push bx
+    mov bl, 63
+     
+    @@forloop:
+        mov ax, start_find
+        cmp ax, end_find
+        jg @@breakloop
+        
+        mov al, byte ptr[si]
+         
+        print_one al
+        
+        cmp dl, posMaxL
+        jne @@next2
+        
+        cmp is_first_print_one, 0
+        jne @@do_next_line
+        mov is_first_print_one, 1
+        jmp @@next2
+        
+        @@do_next_line:
+        mov dl, 5
+        mov posX, 5
+        inc dh
+        inc posY
+        mov ah, 02h
+        int 10h
+        @@next2:
+       
+        inc si
+        inc start_find
+        
+        jmp @@forloop
+    
+    
+    @@breakloop:
+    pop bx
+    
+    @@return:
+    mov is_first_print_one, 0
+    call down_check_main
+    
+    pop ax
+    mov posX, al
+    mov posY, ah
+    pop si
+    mov dh, posY
+    mov dl, posX
+    mov ah, 02h
+    int 10h
+    pop di
+    
+    ret
+    
+select_find_mark    endp
+ 
+    
+screen_find_validate    proc
+    push di
+
+    
+    mov ah, posY
+    mov al, posX
+    push ax
+    
+    mov dh, tempPosY
+    mov dl, tempPosX
+    mov ah, 02h
+    int 10h
+    mov posY, dh
+    mov posX, dl
+    
+    
+
+    mov ax, end_find
+    ;mov ax, start_find
+    cmp ax, current_line_edit_offset
+    jle @@to_zero
+    jmp @@forloop
+    
+    @@to_zero:
+        mov current_line_edit_offset, 0
+        mov current_edit_position, 0
+        mov posX, 5
+        mov posY, 2
+        mov dl, 5
+        mov dh, 2
+        mov ah, 02h
+        int 10h
+        
+        mov current_screen_line_off, 0
+        mov previous_screen_line_off, 0
+        mov sum_screen_line_off,   0
+        mov tempPosY, 2
+        mov tempPosX, 5
+        
+        push bx
+        xor bh,bh
+        mov bl, 00011111b
+        call clear_screen
+        mov dh, 2
+        mov dl, 5 
+        mov ah, 02h
+        int 10h
+        print_zero_line buffer, max_output_len
+        pop bx
+    
+    @@forloop:
+    mov ax, end_find
+    ;mov ax, start_find
+    cmp ax, current_line_edit_offset
+    jg @@above
+    jmp @@before
+    
+    
+    @@above: 
+    push bx
+    xor bh,bh
+    mov bl, 00011111b
+
+    call down_check_main
+    ;call move_down
+    
+    pop bx
+    ;call move_down
+    
+    mov dh, posY
+    mov dl, posX
+    mov tempPosY, dh
+    mov tempPosX, dl
+    
+    jmp @@forloop
+    
+    
+    @@before:
+    
+    
+    
+    @@return:
+    
+    pop ax
+    mov posX, al
+    mov posY, ah
+    mov dh, posY
+    mov dl, posX
+    mov ah, 02h
+    int 10h
+    pop di
+    
+    ret
+
+screen_find_validate    endp    
 
 
+substring_to_find_clear  proc
 
+    push si
+    
+    lea si, substring_to_find
+    mov cx, 62
+    @@forloop:
+    mov byte ptr[si], 0
+    inc si
+    loop @@forloop
+    
+    pop si
+    ret
+
+substring_to_find_clear  endp
+
+
+substring_find_main proc
+    push si
+    push di
+    push cx
+
+    lea si, buffer
+    add si, start_find
+    
+    lea di, substring_to_find
+    
+    mov cx, 0
+    @@forloop1:
+    cmp byte ptr[di], 0
+    je @@breakfor
+    inc cx
+    inc di
+    jmp @@forloop1
+    
+@@breakfor:
+    lea di, substring_to_find
+    inc cx
+    
+    
+    
+@@forloop:
+    mov al, byte ptr[si]
+    
+    cmp al, '0'
+    je @@EOF
+    
+    cmp al, byte ptr[di]
+    je @@check
+    @@check_false:
+    
+    inc si
+    jmp @@forloop
+    
+    @@check:
+    push cx
+    cld
+    repe cmpsb
+    cmp cx, 0
+    je @@true
+    jmp @@false
+    
+    
+    
+        @@true:
+            pop cx
+            mov end_find, si
+            mov start_find, si
+            sub start_find, cx
+            sub end_find, offset buffer
+            sub start_find, offset buffer
+            dec end_find
+            dec end_find
+            jmp @@return
+    
+    
+        @@false:
+            mov ax, cx
+            
+            pop cx
+            push cx
+            
+            sub cx, ax
+            
+            sub si, cx
+            sub di, cx
+            pop cx
+            jmp @@check_false
+        
+     
+    
+@@EOF: 
+    mov end_find, 0
+    mov start_find, 0
+    
+    
+@@return:
+    
+    pop cx
+    pop di
+    pop si
+    ret
+    
+substring_find_main endp
 
     ;// CTRL procedures: EXIT/SAVE/OPEN/FIND
     
@@ -1068,12 +1563,143 @@ find_wait:
     xor ah,ah
     int 16h
     
+    
+    
+    cmp ah, 1Ch
+    je @@new_window
+    
+    cmp ah, 01h
+    je @@return_base_1
+    
+    jmp find_wait
+    
+    
+@@new_window:
+    lea di, substring_to_find
+    
+    pop bx
+    mov dh, 20
+    mov dl, 5
+    mov ah, 02h
+    int 10h
+   
+    mov ax,sum_screen_line_off
+    push ax
+    mov sum_screen_line_off,0
+    mov al, is_end
+    push ax
+    print_zero_line emptyLine, max_output_len
+    pop ax
+    mov is_end, al
+    pop ax
+    mov sum_screen_line_off, ax
+    
+    push bx
+    
+    mov dh, 20
+    mov dl, 5
+    mov ah, 02h
+    int 10h
+    
+    mov posX, dl
+    mov posY, dh
+    
+    @@forn:
+    mov cx, 0
+    mov dx, 1000
+    mov ah, 86h
+    int 15h
+    
+    xor ah,ah
+    int 16h
+    
+    cmp ah, 4Bh
+    je @@forn
+    
+    cmp ah, 4Dh
+    je @@forn
+    
+    cmp ah, 0Eh
+    je @@delete_symb_find
+    
+    cmp ah, 1Ch
+    je @@return_find
+    
+    cmp ah, 50h
+    je @@forn
+    
+    cmp ah, 48h
+    je @@forn
+    
+    cmp ah, 0Fh
+    je @@forn
+    
     cmp ah, 01h
     je @@return
     
-    jmp find_wait
+    jmp @@print_input_key_find
+    
+    ;Long jump
+    @@return_base_1:
+    jmp @@return
+    
+@@print_input_key_find:
+
+    mov bl, 12h
+    print_one al
+    mov byte ptr[di], al
+    inc di
+    mov end_find, 0
+    mov start_find, 0
+    jmp @@forn
+        
+   
+@@delete_symb_find:
+    
+    cmp di, offset substring_to_find
+    je @@forn
+    
+    mov end_find, 0
+    mov start_find, 0
+    
+    mov bl, 12h
+    mov byte ptr[di], 0
+    dec di
+    
+    mov dh, 20
+    dec posX
+    mov dl, posX
+    mov ah, 02h
+    int 10h
+    print_one ' '
+    mov dh, 20
+    dec posX
+    mov dl, posX
+    mov ah, 02h
+    int 10h
+    
+    jmp @@forn
+    
+@@return_find:
+    call substring_find_main
+    
+    call screen_find_validate
+    cmp end_find, 0
+    je @@return_find1
+    
+    call select_find_mark
+    
+    @@return_find1:
+    
+    mov ax, end_find
+    mov start_find, ax
+    
+    jmp @@forn
 
 @@return:
+    call substring_to_find_clear
+    mov end_find, 0
+    mov start_find, 0
     mov dh, 22
     mov dl, 53
     
@@ -1216,9 +1842,27 @@ save_wait:
     cmp ah, 01h
     je return_main_save
     
+    cmp ah, 1Ch 
+    je write
+    
+    jmp save_wait
+    
+    
+write:
+    call write_to_file
+    
+    print_without_off 20, 69, saveCorrect, max_output_len
+    
+    mov dh, 25
+    mov ah,02h
+    int 10h
+    
     jmp save_wait
     
 return_main_save:
+    
+    print_without_off 20, 69, openedCorrect, max_output_len
+    
     mov dh, 22
     mov dl, 21
     
@@ -1256,6 +1900,8 @@ open    proc
     
     mov ah, 02h
     int 10h
+    
+    
     print_zero_line ctrlO, max_output_len
     
 open_wait:
@@ -1305,7 +1951,6 @@ forn:
     
     xor ah,ah
     int 16h
-    cmp ah, 48h
     
     cmp ah, 4Bh
     je move_left_line_inp
@@ -1353,13 +1998,26 @@ move_right_line_inp:
     jmp forn
     
 delete_symb_inp:
+    cmp di, offset file_name
+    je forn
+    
     mov bl, 12h
     mov byte ptr[di], 0
     dec di
     
-    call delete
-    jmp forn
+    mov dh, 20
+    dec posX
+    mov dl, posX
+    mov ah, 02h
+    int 10h
+    print_one ' '
+    mov dh, 20
+    dec posX
+    mov dl, posX
+    mov ah, 02h
+    int 10h
     
+    jmp forn
     
 return_inp:
     jmp return_main_open
@@ -1430,6 +2088,9 @@ right_check_main    proc
     cmp byte ptr[di], 0Dh
     je @@return
     
+    cmp byte ptr[di], '0'
+    je @@return
+    
     inc current_edit_position
     inc di
     
@@ -1452,99 +2113,7 @@ right_check_main    proc
 right_check_main    endp
 
 
-down_check_main    proc
-    push bx
-    call move_down
-    
-    lea di, buffer
-    mov bx, current_line_edit_offset
-    
-    cmp byte ptr[di + bx], 0Dh
-    jne @@forllop
-    inc bx
-    jmp @@breakloop
-    
-    @@forllop:
-        cmp bx, current_edit_position
-        jg @@breakloop
-        
-        cmp byte ptr[di + bx], 0Dh
-        je @@breakloop
-        
-        inc bx
-        jmp @@forllop
-            
-    
-        @@breakloop:
-            dec bx
-            mov current_edit_position, bx
-            
-            sub bx, current_line_edit_offset
-            xor bh,bh
-            mov dl, bl
-            add dl, 5
-            mov posX, dl
-            mov dh ,posY
-            
-            mov ah, 02h
-            int 10h
-    
-    @@return:
-    pop bx
-    ret
-down_check_main    endp
 
-
-
-up_check_main   proc
-    push bx
-    mov ax ,current_line_edit_offset
-    cmp ax, 0
-    je @@return
-    
-    
-    call move_up
-    
-    lea di , buffer
-    mov bx,  current_line_edit_offset
-    
-    cmp byte ptr[di + bx], 0Dh
-    jne @@forlpop
-    inc bx
-    jmp @@true
-    
-    @@forlpop:
-        cmp byte ptr[di + bx], 0Dh
-        je @@true
-        
-        cmp bx, current_edit_position
-        jg @@true
-        
-        inc bx
-        jmp @@forlpop
-        
-    
-    
-    @@true:
-    dec bx
-    mov current_edit_position, bx
-    
-    sub bx, current_line_edit_offset
-    
-    xor bh,bh
-    mov dl, bl
-    add dl ,5
-    mov posX, dl
-    mov ah, 02h
-    int 10h
-    
-    @@return:
-    pop bx
-    ret
-    
-    
-up_check_main   endp
-    
 left_check_main proc
 
 
@@ -1594,6 +2163,10 @@ input_key   proc
     call shift_one
     @@next:
     
+    cmp byte ptr[di], '0'
+    jne @@next3
+    call shift_one
+    @@next3:
     
     mov cl, posMaxL
     cmp posX, cl
@@ -1616,6 +2189,12 @@ input_key   proc
     ret
 
 input_key   endp
+
+
+
+
+
+
 
 ;//Main code section
 start:
