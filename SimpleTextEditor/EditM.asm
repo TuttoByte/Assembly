@@ -1248,7 +1248,7 @@ select_find_mark    proc
         print_zero_line buffer, max_output_len
         pop bx
     
-    mov ax, start_find
+    mov ax, end_find
     sub ax, current_line_edit_offset
     
     
@@ -1261,7 +1261,7 @@ select_find_mark    proc
     mov posX, dl
     
     lea si, buffer
-    add si, start_find
+    add si, end_find
     
     push bx
     mov bl, 63
@@ -1273,27 +1273,34 @@ select_find_mark    proc
         
         mov al, byte ptr[si]
          
-        print_one al
-        
-        cmp dl, posMaxL
+        cmp dl, 4 ;posMinL - 1
         jne @@next2
-        
-        cmp is_first_print_one, 0
-        jne @@do_next_line
-        mov is_first_print_one, 1
-        jmp @@next2
-        
-        @@do_next_line:
-        mov dl, 5
-        mov posX, 5
-        inc dh
-        inc posY
+        mov dl, posMaxL
+        mov posX, dl
+        dec dh
+        dec posY
         mov ah, 02h
         int 10h
-        @@next2:
-       
-        inc si
+        print_one al
+        dec dl
+        mov ah, 02h
+        int 10h
+        dec si
         inc start_find
+        jmp @@forloop
+        
+        ;dec si
+        ;inc start_find 
+        @@next2:
+        
+        print_one al
+     
+        dec si
+        inc start_find
+        sub posX, 2
+        sub dl, 2
+        mov ah, 02h
+        int 10h
         
         jmp @@forloop
     
